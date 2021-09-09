@@ -23,7 +23,6 @@ import argparse
 import os
 import re
 import warnings
-
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 def convert_to_csv(inputFile,outputDir,excluded):
@@ -181,18 +180,31 @@ def convert_to_csv(inputFile,outputDir,excluded):
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
 
-def csv_to_conf(csvFile):
-    #helo
-    print('')
-
-
-
-
 if __name__ == '__main__' :
-    parser = argparse.ArgumentParser(description='Analyze a shmoo plot files', \
-        formatter_class = argparse.RawTextHelpFormatter, epilog = 'usage examples:\n'\
-        '  '\
-        ' ')
+    parser = argparse.ArgumentParser(description=\
+    '''    Searches an excel file for all the tester channel assignments for every
+    net name. The following rules must be followed in formatting excel sheet:
+        1. Only one net name/pin name per row
+            - Column must be first column to have a header that has "name" in it
+            - All letters must be capitalized
+        2. Only one ball name/pin number per row
+            - Searches for first column with 1-3 letters followed by 1-3 numbers only
+            - e.g. AA12 or AB1 or A123 or P13
+        3. As many channels as necessary can be added in a row
+            - searches all columns in row 
+            - accepted channel format examples (no names):
+                a. 12345
+                b. 12345-6
+                c. 123-P4
+                d. 123-P4-P5
+                e. 123.45
+                f. 123A+/123AA-
+                g. PF1-PF12_PSNAME_345/P12_PSNAME_345
+                h. PF1_PSNAME_234/P1_PSNAME_234
+                i. any of the above proceeded by CH/TC''', \
+    formatter_class = argparse.RawTextHelpFormatter, epilog = 'usage examples:\n'\
+        '   netlist_assignments_csv -i PRODUCT-NETLIST-01.xlsx -o OUTPUTDIR\n\n'\
+        '   netlist_assignments_csv -i PRODUCT-NETLIST-01.xlsx -x NC N/A')
     parser.add_argument('-v', '-V', '--version', dest='version', action='store_true',\
         default=False, help='get version of script and exit')
     parser.add_argument('-i', '--input', dest='input', default=None, \
@@ -206,4 +218,4 @@ if __name__ == '__main__' :
         convert_to_csv(args.input, args.outputDir, args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    # except: print('Cannot convert given file')
+    except: print('Cannot convert given file')
