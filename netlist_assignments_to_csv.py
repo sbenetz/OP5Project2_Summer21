@@ -18,6 +18,7 @@
 #################################################################
 
 import pandas as pd
+from openpyxl import load_workbook
 import argparse
 import os
 import re
@@ -25,18 +26,51 @@ import warnings
 
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-def convert_to_csv(inputFile,outputDir):
+def convert_to_csv(inputFile,outputDir,excluded):
+    '''Searches an excel file for all the tester channel assignments for every net 
+    name. The following rules must be followed in formatting excel sheet:
+        1. Only one net name/pin name per row
+            - Column must be first column to have a header that has "name" in it
+            - All letters must be capitalized
+        2. Only one ball name/pin number per row
+            - Searches for first column with 1-3 letters followed by 1-3 numbers only
+            - e.g. AA12 or AB1 or A123 or P13
+        3. As many channels as necessary can be added in a row
+            - searches all columns in row 
+            - accepted channel format examples (no names):
+                a. 12345
+                b. 12345-6
+                c. 123-P4
+                d. 123-P4-P5
+                e. 123.45
+                f. 123A+/123AA-
+                g. PF1-PF12_PSNAME_345/P12_PSNAME_345
+                h. PF1_PSNAME_234/P1_PSNAME_234
+                i. any of the above proceeded by CH/TC
+    '''
     # check inputs
+    inputFile = os.path.realpath(re.sub('["\']','',inputFile))
     if not os.path.isfile : 
         return print(inputFile+' is not a file')
+    outputDir = os.path.realpath(re.sub('["\']','',outputDir))
     if not os.path.isdir(outputDir) :
         os.makedirs(outputDir)
         print('Output folder created: ' + outputDir)
+
     #list out excel worksheets to select from
-    workbook = pd.ExcelFile(inputFile)
-    print('\nSelect worksheet names by typing corresponding numbers separated by spaces')
+    try: 
+        print('Loading workbook...',end='\r')
+        workbook = load_workbook(filename = inputFile)
+    except: return print(os.path.basename(inputFile) + ' is not a valid excel file')
+    sheets = workbook.sheetnames
+    visibleSheets = []
+    for sheet in sheets:
+        if workbook[sheet].sheet_state != 'hidden' : 
+            visibleSheets.append(sheet)
+    print('                       \nSelect worksheet names by typing corresponding'\
+        ' numbers separated by spaces')
     i=0
-    for name in workbook.sheet_names:
+    for name in visibleSheets:
         print('    ' + str(i) + '. ' + name)
         i += 1
     print('    ' + str(i) + '. ALL SHEETS')
@@ -45,77 +79,80 @@ def convert_to_csv(inputFile,outputDir):
     for i in range(0,len(numbers)):
         try : 
             num = int(numbers[i])
-            if num == len(workbook.sheet_names) : names = None;break
-            if not (num >= 0 and num < len(workbook.sheet_names)): 
+            if num == len(visibleSheets) : names = visibleSheets;break
+            if not (num >= 0 and num < len(visibleSheets)): 
                 raise Exception
         except: print('Please enter only integers in above range'); return
-        names.append(workbook.sheet_names[num])
+        names.append(visibleSheets[num])
+
     # pull chosen sheets from excel into raw csv files 
     read_file = pd.read_excel(inputFile, sheet_name=names, header=None,index_col=None)
     sheets = []
     for file in read_file.keys() :
         outputFileRaw = os.path.join(outputDir,file+'_raw.csv')
-        read_file[file].to_csv(outputFileRaw)
+        read_file[file].to_csv(outputFileRaw,sep=';')
         sheets.append(outputFileRaw)
     pNames = {}
     for sheet in sheets :
         readFile = open(sheet, 'r') 
         contents = readFile.readlines()
         nameIdxs = []
-        pinNumIdx = [] 
-        channelIdx = []
         badColNames = ['length', 'len','coord']
         badCols = []
-        firstFound = False
         # try to get pin name, channel number, and ball number from line 
         for line in contents:
             name = None; pinNum = None; channelNum = None
+            #change all commas in line to ! and change separators to commas
+            line = line.replace(',','!').replace(';',',')
             data = line.split(',')
             if name == None :
                     for col in nameIdxs:
                         if data[col].isupper() : name = data[col]; break
             for entry in data :
-                
-                updated = False
+                updatedC = False; updatedP = False
                 ind = data.index(entry)
                 if ind in badCols : continue
                 if any(x in entry for x in badColNames): 
                     if not ind in badCols: badCols.append(ind)
                 if 'name' in entry.lower() : 
-                    nameIdxs.append(ind) # 'Name' in col header
-                # look for pin number (1-3upper case letters followed by 1-3#s)
-                if (not firstFound) or ind in pinNumIdx :
-                    pin = re.match('([A-Z]{1,2}[0-9]{1,2})(\Z|\s|\b)',entry)
+                    if not ind in nameIdxs: nameIdxs.append(ind)#'name' in col header
+                
+                if pinNum == None:
+                    # pin number (1-3 upper case letters followed by 1-3#s) AA11
+                    pin = re.match('([A-Z]{1,2}[0-9]{1,2})(?=((\Z|\s|\b)|\!))',entry)
                     if pin: 
                         pinNum = pin.group(0).strip()
-                        if not ind in pinNumIdx : pinNumIdx.append(ind)
-                        updated = True
-                if (not firstFound) or ind in channelIdx:
-                    try: 
-                        entry = entry.replace('.','').replace('TC','').replace('CH','')
-                        entry = round(float(entry),0); entry = str(entry).replace('.0','')
-                    except : pass
-                    if not firstFound : print(entry)
-                    # 12345 or 12345-6
-                    channel = re.match('([0-9]{5}|([0-9]{5}-[0-9]{1,2}))(\Z|\s|\b)',entry)
+                        updatedP = True
+                try: 
+                    # get rid of letters before channel
+                    entry = re.sub('TC|CH','', entry).replace('PF','P')
+                    #channel formats like PF13-PF16_DPS32_425 
+                    entry =  re.sub('_.*_','_', entry)
+                    if '_'in entry and re.search('[0-9]{3}',entry): 
+                        entry = entry[entry.find('_')+1:]+'-'+entry[:entry.find('_')]
+                    if re.search('[0-9]{3}\.[0-9]{2}',entry) != None:
+                        entry = entry.replace('.','')
+                except : pass
+                # 12345 or 12345-6
+                channel = re.match('([0-9]{5}|([0-9]{5}-[0-9]{1,2}))(\Z|\s|\b)',entry)
+                if channel: 
+                    channelNum = channel.group(0).strip()
+                    updatedC = True
+                else:
+                    #123-P4 or 123-P45 or 123-P4-P5
+                    channel = re.match('[0-9]{3}-P[0-9]{1,2}(-P[0-9]{1,2})?(\Z|\s|\b)',entry)
                     if channel: 
                         channelNum = channel.group(0).strip()
-                        updated = True
+                        updatedC = True
                     else:
-                        #123-P4 or 123-P45 or 123-P4-P5
-                        channel = re.match('[0-9]{3}-P[0-9]{1,2}(-P[0-9]{1,2})?(\Z|\s|\b)',entry)
+                        #123A+ or 123HH-
+                        channel = re.match('[0-9]{3}[A-Z]{1,2}[+|-](\Z|\s|\b)',entry)
                         if channel: 
                             channelNum = channel.group(0).strip()
-                            updated = True
-                        else:
-                            #123A+ or 123HH-
-                            channel = re.match('[0-9]{3}[A-Z]{1,2}[+|-](\Z|\s|\b)',entry)
-                            if channel: 
-                                channelNum = channel.group(0).strip()
-                                updated = True
-                    if not ind in pinNumIdx and updated : channelIdx.append(ind)
+                            updatedC = True
+                
                 # if its a new set of assignments   
-                if name and pinNum and channelNum and updated and name!= pinNum: 
+                if name and pinNum and channelNum and (updatedC or updatedP) and name!= pinNum: 
                     if name in pNames.keys() :
                         if channelNum in pNames[name] and not pinNum in pNames[name]:
                             pNames[name] += [pinNum]
@@ -124,14 +161,12 @@ def convert_to_csv(inputFile,outputDir):
                         elif not channelNum in pNames[name] and not pinNum in pNames[name]: 
                             pNames[name] += [channelNum, pinNum]
                     else: pNames[name] = [channelNum, pinNum]
-            if len(pNames.keys()) > 0 : firstFound = True
         readFile.close()
         os.remove(sheet)
-            # what to do with columns that dont have name label
-            # consider what to do for multiple sites
-    if len(pNames.keys()) == 0 : return
+
+    if len(pNames.keys()) < 0 : return
     filename =  os.path.basename(inputFile)
-    outputFile =filename[:filename.rfind('.')]+'_assignments.csv'
+    outputFile = os.path.join(outputDir,filename[:filename.rfind('.')]+'_assignments.csv')
     writeFile = open(outputFile,'w')
     chHeader = 'Channel Number'
     testLine = pNames[list(pNames.keys())[0]]
@@ -142,6 +177,7 @@ def convert_to_csv(inputFile,outputDir):
         
     writeFile.write('Pin Name,%s,Ball Number(s)\n'%chHeader)
     for key in pNames:
+        if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
 
@@ -163,9 +199,11 @@ if __name__ == '__main__' :
         help='path of excel file to convert')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
+    parser.add_argument('-x', '--exclude', nargs='+',dest='exclude', default=[], \
+        help='pin names to be excluded/ignored (e.g NC)')
     args = parser.parse_args()
-#try:
-    convert_to_csv(args.input, args.outputDir)
-    # except KeyboardInterrupt:
-    #     print('\n Keyboard Interrupt: Process Killed')
+    try:
+        convert_to_csv(args.input, args.outputDir, args.exclude)
+    except KeyboardInterrupt:
+        print('\n Keyboard Interrupt: Process Killed')
     # except: print('Cannot convert given file')
