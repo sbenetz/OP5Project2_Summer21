@@ -16,15 +16,18 @@
 # Version 0.0 is first release 09.09.2021                       #
 #################################################################
 
+version = '0.0'
+
 import pandas as pd
 from openpyxl import load_workbook
 import argparse
 import os
 import re
+import sys
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-def convert_to_csv(inputFile,outputDir,excluded):
+def netlist_to_csv(inputFile,outputDir,excluded):
     '''Searches an excel file for all the tester channel assignments for every net 
     name. The following rules must be followed in formatting excel sheet:
         1. Only one net name/pin name per row
@@ -178,6 +181,7 @@ def convert_to_csv(inputFile,outputDir,excluded):
         if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
+    return pNames
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
@@ -213,8 +217,9 @@ if __name__ == '__main__' :
     parser.add_argument('-x', '--exclude', nargs='+',dest='exclude', default=[], \
         help='pin names to be excluded/ignored (e.g NC)')
     args = parser.parse_args()
+    if args.version: print('Version '+version); sys.exit()
     try:
-        convert_to_csv(args.input, args.outputDir, args.exclude)
+        netlist_to_csv(args.input, args.outputDir, args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
     except: print('Cannot convert given file')
