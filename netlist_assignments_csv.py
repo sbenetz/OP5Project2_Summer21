@@ -1,20 +1,19 @@
 #!/usr/bin/python3
 #################################################################
-#                         get_timing                    		#
+#                     netlist_assignments_csv                   #
 #################################################################
 #                                                               #
-#   This script takes in a folder/file and goes through all the #
-#   subfolders or through fileto get the spec period for each   #
-#   equation set (eg. EQNSET 1). Outputs file: timingSpecs.txt  #
+#   This script takes an excel file that contains a loadboard   #
+#   netlist within it and converts all the assignment to a csv  #  
+#   in the format Net Name,Channel Assignment(s),Pin Number(s)  #
 #                                                               #
 #################################################################
-# Version 0.1                                                   #
+# Version 0.0                                                   #
 # By Shane Benetz                                               #
-# Date: 08.19.2021                                              #
+# Date: 09.09.2021                                              #
 #################################################################
 #################################################################
-# Version 0.0 is first release 08.06.2021                       #
-# Version 0.1 updated path reading and usage info 08.19.2021    #
+# Version 0.0 is first release 09.09.2021                       #
 #################################################################
 
 import pandas as pd
@@ -49,7 +48,7 @@ def convert_to_csv(inputFile,outputDir,excluded):
     '''
     # check inputs
     inputFile = os.path.realpath(re.sub('["\']','',inputFile))
-    if not os.path.isfile : 
+    if not os.path.isfile(inputFile) : 
         return print(inputFile+' is not a file')
     outputDir = os.path.realpath(re.sub('["\']','',outputDir))
     if not os.path.isdir(outputDir) :
