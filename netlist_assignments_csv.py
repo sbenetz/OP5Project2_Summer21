@@ -18,6 +18,7 @@
 
 version = '0.0'
 
+from posixpath import abspath
 import pandas as pd
 from openpyxl import load_workbook
 import argparse
@@ -27,7 +28,7 @@ import sys
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-def netlist_to_csv(inputFile,outputDir,excluded):
+def netlist_to_csv(inputFile,outputDir,productName,excluded):
     '''Searches an excel file for all the tester channel assignments for every net 
     name. The following rules must be followed in formatting excel sheet:
         1. Only one net name/pin name per row
@@ -57,7 +58,9 @@ def netlist_to_csv(inputFile,outputDir,excluded):
     if not os.path.isdir(outputDir) :
         os.makedirs(outputDir)
         print('Output folder created: ' + outputDir)
-
+    if productName == None: #get everything up until the first period or underscore
+        productName = re.match('^(.*?)(?=(\.|_))',os.path.basename(inputFile)).group(0)
+    productName = productName.replace(' ','_')
     #list out excel worksheets to select from
     try: 
         print('Loading workbook...',end='\r')
@@ -68,14 +71,14 @@ def netlist_to_csv(inputFile,outputDir,excluded):
     for sheet in sheets:
         if workbook[sheet].sheet_state != 'hidden' : 
             visibleSheets.append(sheet)
-    print('                       \nSelect worksheet names by typing corresponding'\
-        ' numbers separated by spaces')
+    print(os.path.basename(inputFile)+'         ')
+    print('Select worksheet names by typing corresponding numbers separated by spaces')
     i=0
-    for name in visibleSheets:
-        print('    ' + str(i) + '. ' + name)
+    for sheetname in visibleSheets:
+        print('    ' + str(i) + '. ' + sheetname)
         i += 1
     print('    ' + str(i) + '. ALL SHEETS')
-    numbers = input("Selected Numbers: ").split(' ')
+    numbers = input('Selected Numbers: ').split(' ')
     names= []
     for i in range(0,len(numbers)):
         try : 
@@ -102,13 +105,18 @@ def netlist_to_csv(inputFile,outputDir,excluded):
         badCols = []
         # try to get pin name, channel number, and ball number from line 
         for line in contents:
-            name = None; pinNum = None; channelNum = None
+            pinName = None; channelNum = None
+            pinNum = '""'
+            nameIdx = None
             #change all commas in line to ! and change separators to commas
             line = line.replace(',','!').replace(';',',')
             data = line.split(',')
-            if name == None :
+            if pinName == None :
                     for col in nameIdxs:
-                        if data[col].isupper() : name = data[col]; break
+                        possName = re.search('[^a-z ]{2,}\Z',data[col])
+                        if possName : 
+                            pinName = possName.group(0); nameIdx = col; 
+                            pinName = re.sub('[()]','',pinName); break
             for entry in data :
                 updatedC = False; updatedP = False
                 ind = data.index(entry)
@@ -116,9 +124,9 @@ def netlist_to_csv(inputFile,outputDir,excluded):
                 if any(x in entry for x in badColNames): 
                     if not ind in badCols: badCols.append(ind)
                 if 'name' in entry.lower() : 
-                    if not ind in nameIdxs: nameIdxs.append(ind)#'name' in col header
+                    if not ind in nameIdxs: nameIdxs.append(ind)
                 
-                if pinNum == None:
+                if pinNum == '""' and ind != nameIdx:
                     # pin number (1-3 upper case letters followed by 1-3#s) AA11
                     pin = re.match('([A-Z]{1,2}[0-9]{1,2})(?=((\Z|\s|\b)|\!))',entry)
                     if pin: 
@@ -127,6 +135,7 @@ def netlist_to_csv(inputFile,outputDir,excluded):
                 try: 
                     # get rid of letters before channel
                     entry = re.sub('TC|CH','', entry).replace('PF','P')
+                    entry = entry.replace('MCE', '231')
                     #channel formats like PF13-PF16_DPS32_425 
                     entry =  re.sub('_.*_','_', entry)
                     if '_'in entry and re.search('[0-9]{3}',entry): 
@@ -146,28 +155,27 @@ def netlist_to_csv(inputFile,outputDir,excluded):
                         channelNum = channel.group(0).strip()
                         updatedC = True
                     else:
-                        #123A+ or 123HH-
-                        channel = re.match('[0-9]{3}[A-Z]{1,2}[+|-](\Z|\s|\b)',entry)
+                        #123A+ or 123HH- or CT1
+                        channel = re.match('[0-9]{3}(([A-Z]{1,2}[+|-])|CT1|CT2)(\Z|\s|\b)',entry)
                         if channel: 
                             channelNum = channel.group(0).strip()
                             updatedC = True
                 
                 # if its a new set of assignments   
-                if name and pinNum and channelNum and (updatedC or updatedP) and name!= pinNum: 
-                    if name in pNames.keys() :
-                        if channelNum in pNames[name] and not pinNum in pNames[name]:
-                            pNames[name] += [pinNum]
-                        if pinNum in pNames[name] and not channelNum in pNames[name]:
-                            pNames[name].insert(1,channelNum)
-                        elif not channelNum in pNames[name] and not pinNum in pNames[name]: 
-                            pNames[name] += [channelNum, pinNum]
-                    else: pNames[name] = [channelNum, pinNum]
+                if pinName and pinNum and channelNum and (updatedC or updatedP) and pinName!= pinNum: 
+                    if pinName in pNames.keys() :
+                        if channelNum in pNames[pinName] and not pinNum in pNames[pinName]:
+                            pNames[pinName] += [pinNum]
+                        if pinNum in pNames[pinName] and not channelNum in pNames[pinName]:
+                            pNames[pinName].insert(1,channelNum)
+                        elif not channelNum in pNames[pinName] and not pinNum in pNames[pinName]: 
+                            pNames[pinName] += [channelNum, pinNum]
+                    else: pNames[pinName] = [channelNum, pinNum]
         readFile.close()
         os.remove(sheet)
 
     if len(pNames.keys()) < 0 : return
-    filename =  os.path.basename(inputFile)
-    outputFile = os.path.join(outputDir,filename[:filename.rfind('.')]+'_assignments.csv')
+    outputFile = os.path.join(outputDir,productName+'_netlist_assignments.csv')
     writeFile = open(outputFile,'w')
     chHeader = 'Channel Number'
     testLine = pNames[list(pNames.keys())[0]]
@@ -181,7 +189,7 @@ def netlist_to_csv(inputFile,outputDir,excluded):
         if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
-    return pNames
+    return [pNames,os.path.abspath(outputFile)]
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
@@ -214,12 +222,14 @@ if __name__ == '__main__' :
         help='path of excel file to convert')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
+    parser.add_argument('-n', '--name', dest='name', default=None, \
+        help='name of product and product version (e.g. fulda_B0')
     parser.add_argument('-x', '--exclude', nargs='+',dest='exclude', default=[], \
         help='pin names to be excluded/ignored (e.g NC)')
     args = parser.parse_args()
     if args.version: print('Version '+version); sys.exit()
     try:
-        netlist_to_csv(args.input, args.outputDir, args.exclude)
+        netlist_to_csv(args.input, args.outputDir, args.name, args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
     except: print('Cannot convert given file')

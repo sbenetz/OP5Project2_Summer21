@@ -24,9 +24,10 @@ import re
 import sys
 import itertools
 
-def stil_to_csv(inputFiles,outputDir, name):
-    if name == None: #get everything up until the first period or underscore
-        name = re.match('^(.*?)(?=(\.|_))',os.path.basename(inputFiles[0])).group(0)
+def stil_to_csv(inputFiles,outputDir, productName):
+    if productName == None: #get everything up until the first period or underscore
+        productName = re.match('^(.*?)(?=(\.|_))',os.path.basename(inputFiles[0])).group(0)
+    productName = productName.replace(' ','_')
     outputDir = os.path.realpath(re.sub('["\']','',outputDir))
     if not os.path.isdir(outputDir) :
         os.makedirs(outputDir)
@@ -45,30 +46,37 @@ def stil_to_csv(inputFiles,outputDir, name):
         signals = re.sub(' +', ' ', re.sub('(\n|")','',signals)).strip()+' '
         signalList += list(set(signals.split('; '))- set(signalList)) #join non repeats 
     # write all signals to csv
-    outputFile = os.path.join(outputDir,name+'_stil_assignments.csv')
+    outputFile = os.path.join(outputDir,productName+'_stil_assignments.csv')
     writeFile = open(outputFile, 'w')
     writeFile.write('Pin Name,In/Out/InOut\n')
-    for signal in sorted(signalList,key=lambda x: x[-4:]) : 
+    typeOrder = [' In',' Out',' InOut','']
+    #sort list first in above order then alphabetically
+    signalList = sorted(signalList,key=lambda x:(typeOrder.index(x[x.find(' '):]),x))
+    updatedSignalList = []
+    for signal in signalList: 
         if signal == '':continue
+        updatedSignalList.append(signal.replace(' ',','))
         writeFile.write(signal.replace(' ',',')+'\n')
-
-    writeFile.write('\n#Groups#\n')
-    writeFile.write('\n(In): ')
-    In =  [x[:x.find(' ')] for x in signalList if x.endswith(' In')]
-    for signal in In: writeFile.write(signal+',')
-    writeFile.write('\n(Out): ')
-    Out =  [x[:x.find(' ')] for x in signalList if x.endswith(' Out')]
-    print(Out)
-    for signal in Out: writeFile.write(signal+',')
-    writeFile.write('\n(InOut): ')
-    InOut =  [x[:x.find(' ')] for x in signalList if x.endswith(' InOut')]
-    for signal in InOut: writeFile.write(signal+',')
+    signalList = updatedSignalList
+    #group definitions
+    writeFile.write('\n#IN/OUTS#')
+    writeFile.write('\nCONF I,F160,(')
+    In =  [x[:x.find(',')] for x in signalList if x.endswith(',In')]
+    writeFile.write(','.join(In)+')')
+    writeFile.write('\nCONF O,F160,(')
+    Out =  [x[:x.find(',')] for x in signalList if x.endswith(',Out')]
+    writeFile.write(','.join(Out)+')')
+    writeFile.write('\nCONF IO,F160,(')
+    InOut =  [x[:x.find(',')] for x in signalList if x.endswith(',InOut')]
+    writeFile.write(','.join(InOut)+')')
+    writeFile.write('\n\n#Groups#')
     i = 0
     directs = ['I','O','IO']
     groupDict = {}
     for lists in [In, Out, InOut]:
         groups = []
-        iterator = itertools.groupby(lists, lambda string: string[0:5])
+        iterator = itertools.groupby(lists, lambda string: string[0:4])
+        # number of chars to match by right here -------------------^
         for lists, group in iterator:
             groups.append(list(group))
         for group in groups:
@@ -88,7 +96,9 @@ def stil_to_csv(inputFiles,outputDir, name):
     for key1 in list(groupDict.keys()): # expand groups with common substring in name
         for key2 in list(groupDict.keys()):
             if key1 in groupDict.keys() and key2 in groupDict.keys():
-                if key1!=key2 and key1[:key1.find(')')] in key2[:key2.find(')')] :
+                k1 = key1[3:]; k2 = key2[3:]
+                if k1!=k2 and k1[:k1.find(')')] in k2[:k2.find(')')] or\
+                    sum(k1[i] != k2[i] for i in range(min(len(k1),len(k2))))==1 :# 1 char difference
                     groupDict[key1]+=groupDict[key2]
                     del groupDict[key2]
     for name in groupDict.keys():
@@ -97,7 +107,7 @@ def stil_to_csv(inputFiles,outputDir, name):
             writeFile.write(groupLine)  
     stilFile.close()
     writeFile.close()
-    return signalList
+    return [signalList,os.path.abspath(outputFile)]
 
 
 if __name__ == '__main__' :
