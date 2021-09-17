@@ -25,12 +25,6 @@ import re
 import glob
 from netlist_assignments_csv import netlist_assignments_csv
 from stil_assignments_csv import stil_assignments_csv
-# first in tuple is S2(A)Pogo Block, second is S1(D) Pogo Block
-# 1 indexed list to represnt pin number(e.g. first position is pin 1)
-# conversionTable = [['DD-','HH-'],['DD+','HH+'],['CC-','GG-'],['CC+','GG+'],\
-#     ['BB-','FF-'],['BB+','FF+'],['AA-','EE-'],['AA+','EE+'],['D-','H-'],\
-#     ['D+','H+'],['C-','G-'],['C+','G+'],['B-','F-'],['B+','F+'],\
-#     ['A-','E-'],['A+','E+'],['CT1','CT2']]
 
 #weird but given conversions to mode value in pinconfig (value is index+1)
 conversionTable = ['A+','B+','C+','D+','A-','B-','C-','D-','E+','F+','G+','H+',\
@@ -159,7 +153,8 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
     except:pass  
 
     #start writing to .conf file
-    configFile = open(os.path.join(outputDir,productName+'.conf'),'w')
+    configFileName = os.path.relpath(os.path.join(outputDir,productName+'.conf'))
+    configFile = open(configFileName,'w')
     configFile.write('hp93000,config,0.1\n')
     entries = []
     names = list(netDict.keys())
@@ -303,13 +298,15 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
     configFile.write('\n'.join(entries))
     configFile.write('\nNOOP "7.4.2",,,')
     configFile.close()
+    print('Config file location: '+ '\x1b[0;30;43m' +\
+            configFileName + '\x1b[0m')
 
 def find_oddities(entries,pinCounts,sites):
     words = {}; oddities = []
     for line in entries:
         defs = re.findall('( \d.*?,)',line)+re.findall('".*?"',line)
         for nam in defs:
-            item = re.sub('[()", ]','',nam)
+            item = (nam[1:-1] if len(nam)>2 else None)
             if item == None or (item and len(item) < 2) or item == '': continue
             if item in words.keys(): 
                 if not '\n\nRepeated Definitions:' in oddities:
@@ -357,6 +354,8 @@ if __name__ == '__main__' :
             '\ncsv version of both. can also take directory with files in it')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
+    parser.add_argument('--io', dest='inOut', default=None,\
+        help='path to input and output directory if they are the same')
     parser.add_argument('-n', '--name', dest='name', default=None, \
         help='name of product and product version (e.g. fulda_B0)')
     parser.add_argument('-c', '--cards', dest='psCard', default=['PS9G'],\
@@ -367,8 +366,6 @@ if __name__ == '__main__' :
         help='which analog card is being used. DEFAULT: MCE')
     parser.add_argument('-p', '--print', dest='printerr', default=False,\
         action='store_true',help='print error log to terminal')
-    parser.add_argument('--io', dest='inOut', default=None,\
-        help='path to input and output directory if they are the same')
     args = parser.parse_args()
     if args.version: print('Version '+version); sys.exit()
     if args.inOut != None :

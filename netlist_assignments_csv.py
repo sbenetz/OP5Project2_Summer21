@@ -74,6 +74,8 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
     try: 
         print('Loading workbook...',end='\r')
         workbook = load_workbook(filename = inputFile,data_only=True, read_only=True)
+    except KeyboardInterrupt:
+        return print('\nKeyboard Interrupt: Process Killed')
     except: return print(os.path.basename(inputFile) + ' is not a valid excel file')
     sheetsNames = workbook.sheetnames
     visibleSheets = []
@@ -109,17 +111,21 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
         sheetNums.append(sheetsNames.index(visibleSheets[num]))
     # pull chosen sheets from excel into raw csv files
     sheets = []
-    for numb in sheetNums: 
-        read_file = None
-        try: # for older version on linux "sheetname" instead of "sheet_name"
-            read_file = pd.read_excel(inputFile,sheetname=numb,header=None,index_col=None)
-        except:
-            read_file = pd.read_excel(inputFile,sheet_name=numb,header=None,index_col=None)
-        fileName = sheetsNames[numb] +'_raw.csv'
-        outputFileRaw = os.path.join(outputDir,fileName)
-        read_file.to_csv(outputFileRaw,sep=';',mode='w')
-        sheets.append(outputFileRaw)
-    pNames = {}
+    print('Converting worksheets...', end='\r')
+    try:
+        for numb in sheetNums: 
+            read_file = None
+            try: # for older version on linux "sheetname" instead of "sheet_name"
+                read_file = pd.read_excel(inputFile,sheetname=numb,header=None,index_col=None)
+            except:
+                read_file = pd.read_excel(inputFile,sheet_name=numb,header=None,index_col=None)
+            fileName = sheetsNames[numb] +'_raw.csv'
+            outputFileRaw = os.path.join(outputDir,fileName)
+            read_file.to_csv(outputFileRaw,sep=';',mode='w')
+            sheets.append(outputFileRaw)
+        pNames = {}
+    except KeyboardInterrupt:
+        return print('\nKeyboard Interrupt: Process Killed')
     for sheet in sheets :
         readFile = open(sheet, 'r') 
         contents = readFile.readlines()
@@ -212,6 +218,7 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
         if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
+    print('Done!                                   ')
     return [pNames,os.path.abspath(outputFile)]
 
 if __name__ == '__main__' :
