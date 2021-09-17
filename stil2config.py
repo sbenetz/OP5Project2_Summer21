@@ -89,7 +89,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         with open(netlistCSV,'r') as netlist:
             lines = netlist.readlines()
             if not 'Pin Name,Channel' in lines[0]:
-                return print('Cannot find valid netlist assignments')
+                return print('\nCannot find valid netlist assignments')
             tempDict = {}
             for line in lines[1:]:
                 if len(line) < 4 or line.count(',')<2: break
@@ -99,7 +99,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
                 except: pass
             netDict = tempDict
     if netDict == None or netlistCSV == None : 
-        return print('Cannot find valid netlist assignments')
+        return print('\nCannot find valid netlist assignments')
     
     # get .stil assignments
     stilList = None
@@ -110,15 +110,15 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
             lines = stil.readlines()
             if not 'Pin Name,In/Out/InOut' in lines[0]:
                 stilCSV == None
-                print('Cannot find valid .stil assignments')
+                print('\nannot find valid .stil assignments')
             tempList = []
             for line in lines[1:]:
                 if len(line) < 4: break
                 tempList.append(line[:line.find('\n')])
             stilList = tempList
     if stilList == None or stilCSV == None : 
-        print('Cannot find valid .stil files')
-        print('Getting all assignments from netlist names. All pins are IO')
+        print('\nCannot find valid .stil files, getting all assignments from netlist'\
+            ' names (All pins IO)')
         tempFile = os.path.join(outputDir,'temp_stil_file.stil')
         with open(tempFile,'w') as tempStil:
             tempStil.write('Signals {\n')
@@ -136,10 +136,10 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         else: sites = int(max(numbers))
 
     #print differences to error log
-    errlogFile = None
+    errlogFile = os.path.join(outputDir,productName+'_config_error_log.txt')
+    if os.path.isfile(errlogFile): os.remove(errlogFile)
     diffs = get_diff(netDict,stilList)
     if len(diffs) > 2: 
-        errlogFile = os.path.join(outputDir,productName+'_config_error_log.txt')
         with open(errlogFile,'w') as err:
             err.write('\n'.join(diffs))
     # check for channels that dont have ball assignment: trigger channels
@@ -167,6 +167,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
             stilName = pinName
             pinName = pinName[:pinName.find(',')]
         if not pinName in netDict.keys(): continue #not in netlist
+        if pinName in pinCounts.keys(): continue
         pinData = netDict[pinName]
         #skip names that dont have coherent assignments
         skip = False; matched = False
@@ -228,34 +229,37 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
             else: chnlString = '(%s)'%','.join(chs)
             if i == 1: # first definition of a channel
                 # there are more than one ball numbers associated = power supply
-                if len(pins)>1 and all(re.match('([A-Z]{1,2}[0-9]{1,2})',x) for x in pins): 
+                if len(pins)>1 : 
                     entry = 'DFPS ' + chnlString +',POS,('+pinName +')'
-                    entries.append(entry); isPS = True; pinCounts[pinName] = 1
+                    if not entry in entries:
+                        entries.append(entry); isPS = True; pinCounts[pinName] = 1
                 # there are multiple channels in assignment [12345,12346]
                 elif len(chs) > 1: 
                     entry = 'DFPS ' + chnlString +',POS,('+pinName +')'
-                    entries.append(entry); isPS = True; pinCounts[pinName] = 1
+                    if not entry in entries:
+                        entries.append(entry); isPS = True; pinCounts[pinName] = 1
                 else:
                     lists = [DCS_DPS128HC,DCS_UHC4T]
                     if 'PS9G' in card: lists.append(PS9G)
                     if 'PS1600' in card: lists.append(PS1600)
                     # check to see if the channel is within the power supply ranges
                     for l in lists:
-                        if isPS : break
                         for ranges in l: # from range lists at top of doc
                             low = int(ranges[:ranges.find('-')])
                             high = int(ranges[ranges.find('-')+1:])
                             firstCh = int(chs[0])
-                            if firstCh < high and firstCh > low : #if in PS range
+                            if firstCh <= high and firstCh >= low : #if in PS range
                                 entry = 'DFPS ' + chnlString +',POS,('+pinName +')'
-                                entries.append(entry); pinCounts[pinName] = 1
+                                if not entry in entries:
+                                    entries.append(entry); pinCounts[pinName] = 1
                                 isPS = True; break
                 # not a power supply, just a regular pin 
                 if not isPS and stilName and stilName in stilList: 
                     try: entry = 'DFPN %s,"%s",(%s)'%(chnlString,pins[0],pinName)
                     except: print(pinData)
                     entry = entry.replace('""""','""')
-                    entries.append(entry); pinCounts[pinName] = 1
+                    if not entry in entries:
+                        entries.append(entry); pinCounts[pinName] = 1
             # define PALS for multi-site
             if i>1 :  
                 entry = 'PALS %d,%s,,(%s)'%(i,chnlString,pinName)
@@ -287,31 +291,34 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
     definitions = entries[0:entries.index('PSTE '+str(sites))]
     oddities = find_oddities(definitions,pinCounts,sites)
     if len(oddities) > 0:
-        errlogFile = os.path.join(outputDir,productName+'_config_error_log.txt')
         with open(errlogFile,'a') as err:
             err.write('\n'.join(oddities))
-
     #print error log to terminal
-    if errlogFile and printErr:
-         with open(errlogFile,'r') as err:
-             print(err.read())
+    if os.path.isfile(errlogFile):
+        if printErr:
+            with open(errlogFile,'r') as err:
+                print(err.read())
+        print('\nError log location: ',os.path.relpath(errlogFile))
+    else:
+        print('\nNo Issues found')
     configFile.write('\n'.join(entries))
     configFile.write('\nNOOP "7.4.2",,,')
     configFile.close()
+
     print('Config file location: '+ '\x1b[0;30;43m' +\
             configFileName + '\x1b[0m')
 
 def find_oddities(entries,pinCounts,sites):
     words = {}; oddities = []
     for line in entries:
-        defs = re.findall('( \d.*?,)',line)+re.findall('".*?"',line)
+        defs = re.findall('.\d{5},',line)+re.findall('".*?"',line)
         for nam in defs:
             item = (nam[1:-1] if len(nam)>2 else None)
             if item == None or (item and len(item) < 2) or item == '': continue
             if item in words.keys(): 
                 if not '\n\nRepeated Definitions:' in oddities:
                     oddities.append('\n\nRepeated Definitions:')
-                oddities.append('Repeated %s line %d, first occurance line %d'%\
+                oddities.append('Repeated "%s" on line %d, first occurance line %d'%\
                     (item,entries.index(line)+2,words[item]))
             else: words[item] = entries.index(line)+2
     

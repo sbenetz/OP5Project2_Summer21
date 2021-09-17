@@ -141,11 +141,11 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
             line = line.replace(',','!').replace(';',',')
             data = line.split(',')
             if pinName == None :
-                    for col in nameIdxs:
-                        possName = re.search('[^a-z ]{2,}\Z',data[col])
-                        if possName and len(possName.group(0))>1: 
-                            pinName = possName.group(0); nameIdx = col; 
-                            pinName = re.sub('[()]','',pinName); break
+                for col in nameIdxs:
+                    possName = re.search('[^a-z ]{2,}\Z',data[col])
+                    if possName and len(possName.group(0))>1: 
+                        pinName = possName.group(0); nameIdx = col; 
+                        pinName = re.sub('[()]','',pinName); break
             for entry in data :
                 updatedC = False; updatedP = False
                 ind = data.index(entry)
@@ -154,7 +154,6 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
                     if not ind in badCols: badCols.append(ind)
                 if 'name' in entry.lower() : 
                     if not ind in nameIdxs: nameIdxs.append(ind)
-                
                 if pinNum == '""' and ind != nameIdx:
                     # pin number (1-3 upper case letters followed by 1-3#s) AA11
                     pin = re.match('([A-Z]{1,2}[0-9]{1,2})(?=((\Z|\s|\b)|\!))',entry)
@@ -203,7 +202,8 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
                     else: pNames[pinName] = [channelNum, pinNum]
         readFile.close()
         os.remove(sheet)
-    if len(pNames.keys()) == 0 : return print('Did not find any valid assignments')
+    if len(pNames.keys()) == 0 : return print('Did not find any valid assignments.'\
+        ' Check that net name column has the word "name" in the column header.')
     outputFile = os.path.join(outputDir,productName+'_netlist_assignments.csv')
     writeFile = open(outputFile,'w')
     chHeader = 'Channel Number'
