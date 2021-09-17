@@ -8,22 +8,19 @@ fileOne = open(file1,'r')
 fileTwo = open(file2,'r')
 
 lines1 = fileOne.readlines()
+types = ['DFPN','DFAN''DFPS','DFAN','PSTE','PALS']
 lastInd1 = 0
+l1 = []
 for line in lines1:
-    lastInd1+=1
-    if line.find('PSTE') != -1: break
-lines1 = lines1[0:lastInd1]
-lines1 = list(x[:x.find('\n')] for x in lines1)
+    if any(x in line for x in types) : l1.append(line[:line.find('\n')])
 lines2 = fileTwo.readlines()
 lastInd2 = 0
+l2 = []
 for line in lines2:
-    lastInd2+=1
-    if line.find('PSTE') != -1: break
-lines2 = lines2[0:lastInd2]
-lines2 = list(x[:x.find('\n')] for x in lines2)
+    if any(x in line for x in types) : l2.append(line[:line.find('\n')])
 print('In ',file1,' but not in',file2)
-print('   ','\n    '.join(sorted(list(set(lines1) - set(lines2)))))
+print('   ','\n    '.join(sorted(list(set(l1)-set(l2)),key=lambda x: x[x.rfind('('):])))
 print('In ',file2,' but not in',file1)
-print('   ','\n    '.join(sorted(list(set(lines2) - set(lines1)))))
+print('   ','\n    '.join(sorted(list(set(l2)-set(l1)),key=lambda x: x[x.rfind('('):])))
 fileOne.close()
 fileTwo.close()

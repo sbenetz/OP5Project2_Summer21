@@ -24,14 +24,23 @@ import re
 import sys
 import itertools
 
-def stil_to_csv(inputFiles,outputDir, productName):
+def stil_assignments_csv(inputFiles,outputDir, productName):
+    '''Takes in a list of .stil files and gets all the pins definitions from them
+    along with IO status and groups together all similar names'''
     if productName == None: #get everything up until the first period or underscore
         productName = re.match('^(.*?)(?=(\.|_))',os.path.basename(inputFiles[0])).group(0)
     productName = productName.replace(' ','_')
+    # check output location
     outputDir = os.path.realpath(re.sub('["\']','',outputDir))
-    if not os.path.isdir(outputDir) :
-        os.makedirs(outputDir)
-        print('Output folder created: ' + outputDir)
+    try:
+        if not (os.path.isdir(outputDir)) :
+            os.makedirs(outputDir)
+            print('Output folder created: ',os.path.abspath(outputDir))
+        outputDir = os.path.relpath(outputDir)
+        if not os.access(outputDir, os.W_OK) or not os.access(outputDir, os.R_OK):
+            return print('Output directory not accessible')
+    except: return print('Cannot use given output directory')
+
     signalList=[]
     for file in inputFiles: 
         # check inputs
@@ -42,33 +51,43 @@ def stil_to_csv(inputFiles,outputDir, productName):
         contents = stilFile.read()
         # get block of signal names
         sigStartInd = contents.find('Signals {')+9
+        if sigStartInd == -1: return print('Cannot find signals in ',inputFile)
         signals = contents[sigStartInd:sigStartInd+contents[sigStartInd:].find('}')]
         signals = re.sub(' +', ' ', re.sub('(\n|")','',signals)).strip()+' '
-        signalList += list(set(signals.split('; '))- set(signalList)) #join non repeats 
+        signalList += list(set(signals.split(';'))- set(signalList)) #join non repeats 
+    signalList = [x.strip() for x in signalList]
     # write all signals to csv
     outputFile = os.path.join(outputDir,productName+'_stil_assignments.csv')
     writeFile = open(outputFile, 'w')
-    writeFile.write('Pin Name,In/Out/InOut\n')
-    typeOrder = [' In',' Out',' InOut','']
-    #sort list first in above order then alphabetically
-    signalList = sorted(signalList,key=lambda x:(typeOrder.index(x[x.find(' '):]),x))
+    writeFile.write('Pin Name,In/Out/InOut\n')  
     updatedSignalList = []
-    for signal in signalList: 
-        if signal == '':continue
-        updatedSignalList.append(signal.replace(' ',','))
-        writeFile.write(signal.replace(' ',',')+'\n')
+    for signal in signalList:
+        if signal.find(' In')>0 and signal.replace(' In',' InOut') in signalList: 
+            continue
+        elif signal.find(' Out')>0 and signal.replace(' Out',' InOut') in signalList:
+            continue
+        elif signal.find(' In')>0 and signal.replace(' In',' Out') in signalList: 
+            updatedSignalList.append(signal.replace(' In',',InOut'))
+        elif signal.find(' Out')>0 and signal.replace(' Out',' In') in signalList:
+            continue
+        else:
+            if signal == '':continue
+            updatedSignalList.append(signal.replace(' ',','))
     signalList = updatedSignalList
-    #group definitions
-    writeFile.write('\n#IN/OUTS#')
-    writeFile.write('\nCONF I,F160,(')
-    In =  [x[:x.find(',')] for x in signalList if x.endswith(',In')]
-    writeFile.write(','.join(In)+')')
-    writeFile.write('\nCONF O,F160,(')
-    Out =  [x[:x.find(',')] for x in signalList if x.endswith(',Out')]
-    writeFile.write(','.join(Out)+')')
-    writeFile.write('\nCONF IO,F160,(')
-    InOut =  [x[:x.find(',')] for x in signalList if x.endswith(',InOut')]
-    writeFile.write(','.join(InOut)+')')
+    typeOrder = [',In',',Out',',InOut','']
+    #sort list first in typeOrder then alphabetically
+    signalList = sorted(signalList,key=lambda x:(typeOrder.index(x[x.find(','):]),x))
+    writeFile.write('\n'.join(signalList))
+        
+    # in out definitions for CONF
+    writeFile.write('\n\n#IN/OUTS#')
+    In =  [I[:I.find(',')] for I in signalList if I.endswith(',In')]
+    Out =  [O[:O.find(',')] for O in signalList if O.endswith(',Out')]
+    InOut =  [IO[:IO.find(',')] for IO in signalList if IO.endswith(',InOut')]
+    if len(In) > 0: writeFile.write('\nCONF I,F160,('+','.join(In)+')')
+    if len(Out) > 0: writeFile.write('\nCONF O,F160,('+','.join(Out)+')')
+    if len(InOut) > 0: writeFile.write('\nCONF IO,F160,('+','.join(InOut)+')')
+   #group definitions for DFGP
     writeFile.write('\n\n#Groups#')
     i = 0
     directs = ['I','O','IO']
@@ -97,11 +116,12 @@ def stil_to_csv(inputFiles,outputDir, productName):
         for key2 in list(groupDict.keys()):
             if key1 in groupDict.keys() and key2 in groupDict.keys():
                 k1 = key1[3:]; k2 = key2[3:]
-                if k1!=k2 and k1[:k1.find(')')] in k2[:k2.find(')')] or\
-                    sum(k1[i] != k2[i] for i in range(min(len(k1),len(k2))))==1 :# 1 char difference
+                # one is a subatring of another or they have only 1 char difference
+                if k1!=k2 and (k1[:k1.find(')')] in k2[:k2.find(')')] or\
+                    sum(k1[i] != k2[i] for i in range(min(len(k1),len(k2))))==1) :
                     groupDict[key1]+=groupDict[key2]
                     del groupDict[key2]
-    for name in groupDict.keys():
+    for name in groupDict.keys(): # define groups in .conf format
         if len(groupDict[name])>1:
             groupLine = '\nDFGP '+name.replace('-',(',(%s),'%','.join(groupDict[name])))             
             writeFile.write(groupLine)  
@@ -112,11 +132,11 @@ def stil_to_csv(inputFiles,outputDir, productName):
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
-    '''Convert a .stil file into csv listing the Input/Output status of each pin and
-    grouping together similar pins ''', \
+    '''    Convert .stil file(s) into csv, listing the Input/Output status of each
+    pin and grouping together similar pins''', \
     formatter_class = argparse.RawTextHelpFormatter, epilog = 'usage examples:\n'\
-        '   \n\n'\
-        '   ')
+        '   still_assignments_csv -i bscan.stil -o confFiles/ --name Product\n\n'\
+        '   still_assignments_csv -i bscan.stil mbist.stil -n Product')
     parser.add_argument('-v', '-V', '--version', dest='version', action='store_true',\
         default=False, help='get version of script and exit')
     parser.add_argument('-i', '--input', dest='inputs', nargs = '+', required=True, \
@@ -124,11 +144,11 @@ if __name__ == '__main__' :
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
     parser.add_argument('-n', '--name', dest='name', default=None, \
-        help='name of product and product version (e.g. fulda_B0')
+        help='name of product and product version (e.g. fulda_B0)')
     args = parser.parse_args()
     if args.version: print('Version '+version); sys.exit()
     try:
-        stil_to_csv(args.inputs, args.outputDir, args.name)
+        stil_assignments_csv(args.inputs, args.outputDir, args.name)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    #except: print('Cannot convert given file')
+    except: print('Cannot convert given file')

@@ -10,7 +10,7 @@
 #################################################################
 # Version 0.0                                                   #
 # By Shane Benetz                                               #
-# Date: 09.09.2021                                              #
+# Date: 09.15.2021                                              #
 #################################################################
 #################################################################
 # Version 0.0 is first release 09.09.2021                       #
@@ -18,7 +18,6 @@
 
 version = '0.0'
 
-from posixpath import abspath
 import pandas as pd
 from openpyxl import load_workbook
 import argparse
@@ -28,9 +27,9 @@ import sys
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
-def netlist_to_csv(inputFile,outputDir,productName,excluded):
+def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
     '''Searches an excel file for all the tester channel assignments for every net 
-    name. The following rules must be followed in formatting excel sheet:
+    name. The following rules must be followed in formatting the excel sheet:
         1. Only one net name/pin name per row
             - Column must be first column to have a header that has "name" in it
             - All letters must be capitalized
@@ -45,32 +44,44 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
                 c. 123-P4
                 d. 123-P4-P5
                 e. 123.45
-                f. 123A+/123AA-
-                g. PF1-PF12_PSNAME_345/P12_PSNAME_345
-                h. PF1_PSNAME_234/P1_PSNAME_234
+                f. 231A+/231AA-
+                g. PF1-PF12_NAME_345/P12_NAME_345
+                h. PF1_NAME_234/P1_NAME_234
                 i. any of the above proceeded by CH/TC
+        note: Analog pins are defined by using the 231A+ format
+        only the the letters will be translated and not the 3 numbers before 
     '''
-    # check inputs
+    # check inputs/outputs
     inputFile = os.path.realpath(re.sub('["\']','',inputFile))
     if not os.path.isfile(inputFile) : 
         return print(inputFile+' is not a file')
     outputDir = os.path.realpath(re.sub('["\']','',outputDir))
-    if not os.path.isdir(outputDir) :
-        os.makedirs(outputDir)
-        print('Output folder created: ' + outputDir)
-    if productName == None: #get everything up until the first period or underscore
+    try:
+        if not (os.path.isdir(outputDir)) :
+            os.makedirs(outputDir)
+            print('Output folder created: ',os.path.abspath(outputDir))
+        outputDir = os.path.relpath(outputDir)
+        if not os.access(outputDir, os.W_OK) or not os.access(outputDir, os.R_OK):
+            return print('Output directory not accessible')
+    except: return print('Cannot use given output directory')
+
+    # get everything up until the first period or underscore of file name
+    if productName == None: 
         productName = re.match('^(.*?)(?=(\.|_))',os.path.basename(inputFile)).group(0)
     productName = productName.replace(' ','_')
-    #list out excel worksheets to select from
+
+    # list out excel worksheets to select from
     try: 
         print('Loading workbook...',end='\r')
-        workbook = load_workbook(filename = inputFile)
+        workbook = load_workbook(filename = inputFile,data_only=True, read_only=True)
     except: return print(os.path.basename(inputFile) + ' is not a valid excel file')
-    sheets = workbook.sheetnames
+    sheetsNames = workbook.sheetnames
     visibleSheets = []
-    for sheet in sheets:
+    # get all the non hidden worksheets
+    for sheet in sheetsNames:
         if workbook[sheet].sheet_state != 'hidden' : 
             visibleSheets.append(sheet)
+    workbook.close()
     print(os.path.basename(inputFile)+'         ')
     print('Select worksheet names by typing corresponding numbers separated by spaces')
     i=0
@@ -78,23 +89,35 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
         print('    ' + str(i) + '. ' + sheetname)
         i += 1
     print('    ' + str(i) + '. ALL SHEETS')
-    numbers = input('Selected Numbers: ').split(' ')
-    names= []
+    # get the user input
+    numbers = input('Selected Numbers: ')
+    numbers = re.findall(r'\d+',numbers)
+    names= []; sheetNums = []
     for i in range(0,len(numbers)):
         try : 
-            num = int(numbers[i])
-            if num == len(visibleSheets) : names = visibleSheets;break
+            num = int(numbers[i].strip())
+            if num == len(visibleSheets) : 
+                names = visibleSheets
+                for name in names:
+                    if sheetsNames.index(name) not in sheetNums: 
+                        sheetNums.append(sheetsNames.index(name))
+                break
             if not (num >= 0 and num < len(visibleSheets)): 
                 raise Exception
         except: print('Please enter only integers in above range'); return
         names.append(visibleSheets[num])
-
-    # pull chosen sheets from excel into raw csv files 
-    read_file = pd.read_excel(inputFile, sheet_name=names, header=None,index_col=None)
+        sheetNums.append(sheetsNames.index(visibleSheets[num]))
+    # pull chosen sheets from excel into raw csv files
     sheets = []
-    for file in read_file.keys() :
-        outputFileRaw = os.path.join(outputDir,file+'_raw.csv')
-        read_file[file].to_csv(outputFileRaw,sep=';')
+    for numb in sheetNums: 
+        read_file = None
+        try: # for older version on linux "sheetname" instead of "sheet_name"
+            read_file = pd.read_excel(inputFile,sheetname=numb,header=None,index_col=None)
+        except:
+            read_file = pd.read_excel(inputFile,sheet_name=numb,header=None,index_col=None)
+        fileName = sheetsNames[numb] +'_raw.csv'
+        outputFileRaw = os.path.join(outputDir,fileName)
+        read_file.to_csv(outputFileRaw,sep=';',mode='w')
         sheets.append(outputFileRaw)
     pNames = {}
     for sheet in sheets :
@@ -103,7 +126,7 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
         nameIdxs = []
         badColNames = ['length', 'len','coord']
         badCols = []
-        # try to get pin name, channel number, and ball number from line 
+        # try to get pin name, channel number(s), and ball number from line 
         for line in contents:
             pinName = None; channelNum = None
             pinNum = '""'
@@ -114,7 +137,7 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
             if pinName == None :
                     for col in nameIdxs:
                         possName = re.search('[^a-z ]{2,}\Z',data[col])
-                        if possName : 
+                        if possName and len(possName.group(0))>1: 
                             pinName = possName.group(0); nameIdx = col; 
                             pinName = re.sub('[()]','',pinName); break
             for entry in data :
@@ -136,10 +159,11 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
                     # get rid of letters before channel
                     entry = re.sub('TC|CH','', entry).replace('PF','P')
                     entry = entry.replace('MCE', '231')
-                    #channel formats like PF13-PF16_DPS32_425 
+                    # channel formats like PF13-PF16_DPS32_425 
                     entry =  re.sub('_.*_','_', entry)
                     if '_'in entry and re.search('[0-9]{3}',entry): 
                         entry = entry[entry.find('_')+1:]+'-'+entry[:entry.find('_')]
+                    # 123.45 format
                     if re.search('[0-9]{3}\.[0-9]{2}',entry) != None:
                         entry = entry.replace('.','')
                 except : pass
@@ -173,8 +197,7 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
                     else: pNames[pinName] = [channelNum, pinNum]
         readFile.close()
         os.remove(sheet)
-
-    if len(pNames.keys()) < 0 : return
+    if len(pNames.keys()) == 0 : return print('Did not find any valid assignments')
     outputFile = os.path.join(outputDir,productName+'_netlist_assignments.csv')
     writeFile = open(outputFile,'w')
     chHeader = 'Channel Number'
@@ -193,8 +216,8 @@ def netlist_to_csv(inputFile,outputDir,productName,excluded):
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
-    '''    Searches an excel file for all the tester channel assignments for every
-    net name. The following rules must be followed in formatting excel sheet:
+    '''    Searches an excel file for all tester channel assignments and every net 
+    name. The following rules must be followed in formatting the excel sheet:
         1. Only one net name/pin name per row
             - Column must be first column to have a header that has "name" in it
             - All letters must be capitalized
@@ -209,27 +232,29 @@ if __name__ == '__main__' :
                 c. 123-P4
                 d. 123-P4-P5
                 e. 123.45
-                f. 123A+/123AA-
-                g. PF1-PF12_PSNAME_345/P12_PSNAME_345
-                h. PF1_PSNAME_234/P1_PSNAME_234
-                i. any of the above proceeded by CH/TC''', \
+                f. 231A+/231AA-
+                g. PF1-PF12_NAME_345/P12_NAME_345
+                h. PF1_NAME_234/P1_NAME_234
+                i. any of the above proceeded by CH/TC
+        Note: Analog pins are defined by using the 231A+ format.
+        Only the the letters will be translated and not the 3 numbers before ''', \
     formatter_class = argparse.RawTextHelpFormatter, epilog = 'usage examples:\n'\
         '   netlist_assignments_csv -i PRODUCT-NETLIST-01.xlsx -o OUTPUTDIR\n\n'\
-        '   netlist_assignments_csv -i PRODUCT-NETLIST-01.xlsx -x NC N/A')
+        '   netlist_assignments_csv -i PRODUCT-NETLIST-01.xlsx -x NC N/A -n PRODUCT')
     parser.add_argument('-v', '-V', '--version', dest='version', action='store_true',\
         default=False, help='get version of script and exit')
-    parser.add_argument('-i', '--input', dest='input', default=None, \
+    parser.add_argument('-i', '--input', dest='inputFile', default=None, \
         help='path of excel file to convert')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
     parser.add_argument('-n', '--name', dest='name', default=None, \
-        help='name of product and product version (e.g. fulda_B0')
+        help='name of product and product version (e.g. fulda_B0)')
     parser.add_argument('-x', '--exclude', nargs='+',dest='exclude', default=[], \
         help='pin names to be excluded/ignored (e.g NC)')
     args = parser.parse_args()
     if args.version: print('Version '+version); sys.exit()
     try:
-        netlist_to_csv(args.input, args.outputDir, args.name, args.exclude)
+        netlist_assignments_csv(args.inputFile,args.outputDir,args.name,args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
     except: print('Cannot convert given file')
