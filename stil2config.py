@@ -14,15 +14,20 @@
 #################################################################
 #################################################################
 # Version 0.0 is first release 09.10.2021                       #
+# Version 0.1 updated error logging with locations in excel     #
 #################################################################
 
-version = '0.0'
+version = '0.1'
 
 import argparse
 import sys
 import os
 import re
 import glob
+import openpyxl
+import itertools
+from openpyxl.utils.cell import get_column_letter, column_index_from_string
+from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 from netlist_assignments_csv import netlist_assignments_csv
 from stil_assignments_csv import stil_assignments_csv
 
@@ -37,6 +42,8 @@ DCS_DPS128HC = ['22501-22516','42501-42516','22901-22916','42901-42916']
 PS1600 = ['12501-13216', '11701-12416', '10101-10816', '20101-20816', '40101-40816',\
     '10901-11616', '20901-21616', '40901-41616', '21701-22416', '41701-42416']
 DCS_UHC4T = ['22701-22704', '23001-23004']
+thinBorders = Border(left=Side(style='thin'),right=Side(style='thin'), \
+    top=Side(style='thin'), bottom=Side(style='thin'))
 
 def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
     '''    Takes in data containing pin defintion for a device and creates a .conf file
@@ -83,9 +90,11 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         productName = productName.replace(' ','_')
     # get netlist assignments
     netDict = None
+    ballMap = None
+    locations = {}
     if netlistCSV == None and netlistFile :
-        netDict, netlistCSV = netlist_assignments_csv(netlistFile,outputDir,productName,[None])
-    if netlistCSV and netDict == None:
+        netDict, netlistCSV, ballMap = netlist_assignments_csv(netlistFile,outputDir,productName,[None])
+    if netlistCSV :
         with open(netlistCSV,'r') as netlist:
             lines = netlist.readlines()
             if not 'Pin Name,Channel' in lines[0]:
@@ -96,6 +105,11 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
                 try:
                     data = line.replace('\n','').split(',')
                     tempDict[data[0]] = data[1:]
+                    if ':Row' in data[-1] : 
+                        locations[data[0]] = data[-1]
+                        if data[-2].startswith('(') and data[-2].endswith(')'):
+                            locations[data[0]] = data[-2]+','+locations[data[0]]
+                        data.pop(-1)
                 except: pass
             netDict = tempDict
     if netDict == None or netlistCSV == None : 
@@ -110,7 +124,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
             lines = stil.readlines()
             if not 'Pin Name,In/Out/InOut' in lines[0]:
                 stilCSV == None
-                print('\nannot find valid .stil assignments')
+                print('\nCannot find valid .stil assignments')
             tempList = []
             for line in lines[1:]:
                 if len(line) < 4: break
@@ -135,23 +149,48 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         if len(numbers) == 0: sites = 1
         else: sites = int(max(numbers))
 
-    #print differences to error log
-    errlogFile = os.path.join(outputDir,productName+'_config_error_log.txt')
-    if os.path.isfile(errlogFile): os.remove(errlogFile)
-    diffs = get_diff(netDict,stilList)
-    if len(diffs) > 2: 
-        with open(errlogFile,'w') as err:
-            err.write('\n'.join(diffs))
+    diffs, stilDiffs, netDiffs = get_diff(netDict,stilList,locations)
     # check for channels that dont have ball assignment: trigger channels
     extraCONFI = []
     try:
-        extraInNet = diffs[diffs.index('\nIn netlist but not in .stil:')+1:]  
-        for net in extraInNet:
+        #extraInNet = diffs[diffs.index('\nIn netlist but not in .stil:')+1:]  
+        for net in netDiffs:
             if '""' in netDict[net] : 
                 stilList.append(net+',I'); extraCONFI.append(net)
                 diffs.remove(net)
     except:pass  
 
+    #find if there are any names that have only be changed a bit netween stil & net
+    transferNames = {}
+    for sName in stilDiffs:
+        if sName in netDict.keys(): continue
+        for nName in netDiffs:
+            #reverse the string then look for the first group of numbers, then 
+            #reverse the string back and convert to an int
+            try:
+                stilNums = None; netNums = None
+                stilNums = re.search('\d+',sName[::-1])
+                if stilNums: stilNums = int(stilNums.group(0)[::-1])
+                else: stilNums = ''
+                netNums = re.search('\d+',nName[::-1])
+                if netNums: netNums = int(netNums.group(0)[::-1])
+                else: netNums = ''
+                if stilNums != netNums: continue
+            except: pass
+            #get just the letters
+            stilChars = None ; netChars = None
+            stilChars = re.sub('[\[\]]','',sName).split('_')
+            netChars = re.sub('[\[\]]','',nName).split('_')
+            testList = [] 
+            #check each chunk of var name to see if stil is a variant of net name
+            for Schunk in stilChars:
+                for Nchunk in netChars:
+                    if Nchunk in testList: continue
+                    #if the netlist chnk is substring of stil list chunk
+                    if Schunk == Nchunk or(len(Nchunk) > 1 and Nchunk in Schunk): 
+                        if not Nchunk in testList: testList.append(Nchunk); break
+            if testList == netChars and testList != []:
+                transferNames[nName] = [sName]
     #start writing to .conf file
     configFileName = os.path.relpath(os.path.join(outputDir,productName+'.conf'))
     configFile = open(configFileName,'w')
@@ -221,6 +260,9 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         if analog: continue
         i=0
         isPS = False
+        if pinName in transferNames.keys() and channels != None:
+            for ch in channels:
+                transferNames[pinName] += ch
         for chs in channels:
             i+=1
             for ch in chs:
@@ -254,12 +296,14 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
                                     entries.append(entry); pinCounts[pinName] = 1
                                 isPS = True; break
                 # not a power supply, just a regular pin 
-                if not isPS and stilName and stilName in stilList: 
-                    try: entry = 'DFPN %s,"%s",(%s)'%(chnlString,pins[0],pinName)
-                    except: print(pinData)
+                if not isPS and ((stilName and stilName in stilList) \
+                    or pinName in transferNames.keys()): 
+                    entry = 'DFPN %s,"%s",(%s)'%(chnlString,pins[0],pinName)
+                    #if its a trigger
                     entry = entry.replace('""""','""')
                     if not entry in entries:
                         entries.append(entry); pinCounts[pinName] = 1
+                elif not isPS: break
             # define PALS for multi-site
             if i>1 :  
                 entry = 'PALS %d,%s,,(%s)'%(i,chnlString,pinName)
@@ -268,49 +312,108 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         if isPS and pinName not in PSs: PSs.append(pinName) # track power supplies
     if len(PSs) > 0: entries.append('CONF DC,POWER,(%s)'%','.join(PSs))
     entries.append('PSTE '+str(sites))
+    #write the transfer file
+    transferFile =  os.path.join(outputDir,productName+'_transfer_names.txt')
+    if len(transferNames.keys()) > 0:
+        with open(transferFile,'w') as tf:
+            tf.write('Stil Name --> Netlist Name, Channel\n')
+            for name in transferNames.keys():
+                tnList = transferNames[name]
+                stilName = tnList[0]
+                tnList[0] = name
+                tf.write(stilName + ' --> ' + ', '.join(tnList)+ '\n')
+                tnList[0] = stilName
     # get all the group/conf definitions from the .stil conversion csv
     with open(stilCSV,'r') as groupsFile:
         content = groupsFile.read()
         groups = content[content.find('#'):]
-        for netName in diffs: # replace ones that dont exist in netlist
-            groups = groups.replace(','+netName+',',',')
-            groups = groups.replace(','+netName+')',')')
-            groups = groups.replace('('+netName+',','(')
+        for nName in transferNames.keys():
+            sName = transferNames[nName][0]
+            try:
+                diffInd = diffs.index(sName)
+                diffs[diffInd] = diffs[diffInd]+' (transfer found)'
+            except: pass
+            groups = groups.replace(','+sName+',',','+nName+',')
+            groups = groups.replace(','+sName+')',','+nName+')')
+            groups = groups.replace('('+sName+',','('+nName+',')
+        for stilName in diffs: # replace ones that dont exist in stillist
+            groups = groups.replace(','+stilName+',',',')
+            groups = groups.replace(','+stilName+')',')')
+            groups = groups.replace('('+stilName+',','(')
     if len(extraCONFI)>1: entries.append('DFGP I,(%s)(triggers)'%','.join(extraCONFI))
     groups = groups.splitlines()
+    confNames = [x[x.rfind('(')+1:x.rfind(')')] for x in entries if x.startswith('DFPN')]
+    #rename groups if necessary
     for group in groups:
-        if group.startswith('CONF I') and len(extraCONFI) > 0:
+        gInd = groups.index(group)
+        gNames = group[group.find('(')+1:group.find(')')].split(',')
+        gNames = [x for x in gNames if x in confNames]
+        if group.startswith('CONF'): 
+            groups[gInd] = groups[gInd][:groups[gInd].find('(')+1] + ','.join(gNames) + ')'
+            continue
+        largestSub = (os.path.commonprefix(gNames)).lower()
+        if largestSub.endswith('_') or largestSub.endswith('['): 
+                largestSub = largestSub[0:len(largestSub)-1]
+        if len(largestSub) < 3 or len(gNames) < 2: groups[gInd] = None
+        else:
+            groups[gInd] = groups[gInd][:groups[gInd].rfind('(')+1] + largestSub + ')' 
+    for group in groups:
+        if group == None: continue
+        if group.startswith('CONF I,') and len(extraCONFI) > 0:
             group = group[:group.rfind(')')]+','+','.join(extraCONFI)+')'
-        if (group.startswith('CONF') or group.startswith('DFGP')) and \
-            group[group.find('('):group.rfind(')')].count(',')>1 :
-            entries.append(group)      
+        # if (group.startswith('CONF') or group.startswith('DFGP')) and \
+        #     group[group.find('('):group.find(')')].count(',')>1 :
+        entries.append(group)      
     order = ['DFPN','DFPS','DFAN','PALS','PSTE','CONF','DFGP']
     entries = sorted(entries,key=lambda x:(order.index(x[0:4]),x[x.rfind('('):]))
 
+    #print differences to error log
+    errlogFile = os.path.join(outputDir,productName+'_config_error_log.txt')
+    if os.path.isfile(errlogFile): os.remove(errlogFile)
+    if len(diffs) > 2: 
+        with open(errlogFile,'w') as err:
+            err.write('\n'.join(diffs).strip())
+
     # log repeated elements from config  
     definitions = entries[0:entries.index('PSTE '+str(sites))]
-    oddities = find_oddities(definitions,pinCounts,sites)
+    oddities = find_oddities(definitions,pinCounts,sites,locations)
+    configFile.write('\n'.join(entries))
+    configFile.write('\nNOOP "7.4.2",,,')
+    configFile.close()
     if len(oddities) > 0:
         with open(errlogFile,'a') as err:
-            err.write('\n'.join(oddities))
+            err.write('\n' + '\n'.join(oddities).strip())
     #print error log to terminal
     if os.path.isfile(errlogFile):
         if printErr:
             with open(errlogFile,'r') as err:
-                print(err.read())
-        print('\nError log location: ',os.path.relpath(errlogFile))
+                print(err.read().strip())
+        print('Error log location: ',os.path.relpath(errlogFile))
     else:
         print('\nNo Issues found')
-    configFile.write('\n'.join(entries))
-    configFile.write('\nNOOP "7.4.2",,,')
-    configFile.close()
-
+    if os.path.isfile(transferFile):
+        if printErr:
+            with open(transferFile,'r') as tran:
+                print(tran.read().strip())
+        print('Pin Name Cross-Refs location: ',os.path.relpath(transferFile))
     print('Config file location: '+ '\x1b[0;30;43m' +\
             configFileName + '\x1b[0m')
+    #print(ballMap)
+    make_excel_docs(productName,outputDir,netDict,configFileName,ballMap)
 
-def find_oddities(entries,pinCounts,sites):
+def find_oddities(entries,pinCounts,sites,locations):
     words = {}; oddities = []
     for line in entries:
+        name = line[line.rfind('(')+1:line.rfind(')')]
+        if name in locations.keys():
+            if line.startswith('PALS') and ',' in locations[name]:
+                loc = locations[name][locations[name].find(',')+1:]
+            elif line.startswith('DF') and ',' in locations[name]:
+                loc = locations[name][:locations[name].find(',')]
+            else:
+                loc = locations[name]
+        else : loc = ''
+        #get the channel assignments and the ball assignments
         defs = re.findall('.\d{5},',line)+re.findall('".*?"',line)
         for nam in defs:
             item = (nam[1:-1] if len(nam)>2 else None)
@@ -318,9 +421,9 @@ def find_oddities(entries,pinCounts,sites):
             if item in words.keys(): 
                 if not '\n\nRepeated Definitions:' in oddities:
                     oddities.append('\n\nRepeated Definitions:')
-                oddities.append('Repeated "%s" on line %d, first occurance line %d'%\
-                    (item,entries.index(line)+2,words[item]))
-            else: words[item] = entries.index(line)+2
+                oddities.append('Repeated "%s" on .conf line %d %s, first occurance .conf line %s'%\
+                    (item,entries.index(line)+2,loc,words[item]))
+            else: words[item] = str(entries.index(line)+2) + ' ' + loc
     
     for pin in pinCounts.keys():
         if pinCounts[pin] != sites:
@@ -331,18 +434,75 @@ def find_oddities(entries,pinCounts,sites):
             oddities.append(errString)
     return oddities
 
-def get_diff(netDict,stilList):
+def get_diff(netDict,stilList,locations):
     differ = ['In .stil but not in netlist:']
     stilListNames = []
+    stilDiff = []; netDiff = []
     for assignment in stilList :
         stilListNames.append(assignment[:assignment.find(',')])
     netDictNames = netDict.keys()
     for name in stilListNames:
-        if name not in netDictNames: differ.append(name)
+        if name not in netDictNames: differ.append(name); stilDiff.append(name)
     differ.append('\nIn netlist but not in .stil:')
     for name in netDictNames:
-        if name not in stilListNames: differ.append(name)
-    return differ
+        if name in locations.keys(): loc = locations[name]
+        else : loc = ''
+        if name not in stilListNames: differ.append(name+' '+loc); netDiff.append(name)
+    return differ, stilDiff, netDiff
+
+def make_excel_docs(productName, outputDir, netDict, configFile, ballMap):
+    outFileName = os.path.join(outputDir,productName+'config_info.xlsx')
+    i = 0
+    while os.path.isfile(outFileName) :
+        i+=1
+        outFileName = outFileName[:outFileName.rfind('_info')] + '_info_' +str(i) + '.xlsx'
+    
+    workbook = openpyxl.Workbook()
+    
+    for worksheet in workbook.sheetnames : 
+        if workbook[worksheet].max_column == 1 and workbook[worksheet].max_row == 1:
+            del workbook[worksheet] # delete extra empty sheets
+    WS = workbook.create_sheet('Ball Map')
+    assignments = {}
+    if ballMap:
+        for ballLoc in ballMap.keys():
+            if ballLoc == '""':continue
+            try:
+                WS[ballLoc] = ballMap[ballLoc]
+            except:pass
+    else:
+        with open(configFile,'r') as config:
+            content = config.read()
+        for pinName in netDict.keys(): 
+            if content.find('('+pinName+')') < 0 : continue
+            line = ','.join(netDict[pinName]) + ','
+            balls = re.findall(',[A-Z]{1,3}[0-9]{1,3},',line)
+            channel = line[:line.find(',')]
+            for ball in balls:
+                assignments[ball.replace(',','')] = pinName  + '                 ' + channel
+        for ballLoc in assignments.keys():
+            if ballLoc == '""':continue
+            WS[ballLoc] = assignments[ballLoc] 
+    #set dimensions
+    for col in range(WS.max_column+1):
+        WS.column_dimensions[get_column_letter(col+1)].width = 13
+    for row in range(WS.max_row+1):
+        WS.row_dimensions[row].height = 64   
+    #add borders
+    for row in WS.rows:
+        for cell in row:
+            cell.border = thinBorders
+            cell.alignment = Alignment(horizontal='center',vertical='center',wrap_text=True)
+    #delete empty columns
+    for col in range(1,WS.max_column+1):
+        empty = True
+        for row in range(1,WS.max_row+1):
+            if WS.cell(row=row,column=col).value: empty = False; break
+        if empty:
+            WS.delete_cols(col,1)
+    workbook.save(outFileName)
+
+
     
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
@@ -385,4 +545,4 @@ if __name__ == '__main__' :
             args.printerr)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    except: print('Cannot convert given files')
+    #except: print('Cannot convert given files')

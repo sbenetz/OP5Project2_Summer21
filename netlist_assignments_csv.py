@@ -126,6 +126,7 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
         pNames = {}
     except KeyboardInterrupt:
         return print('\nKeyboard Interrupt: Process Killed')
+    ballMap = {}
     for sheet in sheets :
         readFile = open(sheet, 'r') 
         contents = readFile.readlines()
@@ -200,6 +201,16 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
                         elif not channelNum in pNames[pinName] and not pinNum in pNames[pinName]: 
                             pNames[pinName] += [channelNum, pinNum]
                     else: pNames[pinName] = [channelNum, pinNum]
+                    if not pinNum in ballMap.keys():
+                        ballMap[pinNum] = pinName + '                 ' + channelNum
+                    elif not channelNum in ballMap[pinNum]:
+                        ballMap[pinNum] += ',            ' + channelNum
+            if pinNum and pinName and not pinNum in ballMap.keys():
+                ballMap[pinNum] = pinName 
+            if pinName in pNames.keys() :
+                row = str(int(data[0])+1)
+                pNames[pinName] += \
+                ['('+os.path.basename(sheet[:sheet.rfind('_')])+':Row '+row+')']
         readFile.close()
         os.remove(sheet)
     if len(pNames.keys()) == 0 : return print('Did not find any valid assignments.'\
@@ -213,13 +224,13 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
         if i == 1 : chHeader = 'Channel Site-1,Channel Site-2'
         elif i > 1: chHeader += ',Channel Site-'+str(i+1)
         
-    writeFile.write('Pin Name,%s,Ball Number(s)\n'%chHeader)
+    writeFile.write('Pin Name,%s,Ball Number(s),(Sheet name: Row #)\n'%chHeader)
     for key in pNames:
         if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
     writeFile.close()
     print('Done!                                   ')
-    return [pNames,os.path.abspath(outputFile)]
+    return [pNames,os.path.abspath(outputFile),ballMap]
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser(description=\
@@ -264,4 +275,4 @@ if __name__ == '__main__' :
         netlist_assignments_csv(args.inputFile,args.outputDir,args.name,args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    except: print('Cannot convert given file')
+    #except: print('Cannot convert given file')

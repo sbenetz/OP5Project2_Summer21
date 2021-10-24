@@ -116,7 +116,7 @@ def stil_assignments_csv(inputFiles,outputDir, productName):
         for key2 in list(groupDict.keys()):
             if key1 in groupDict.keys() and key2 in groupDict.keys():
                 k1 = key1[3:]; k2 = key2[3:]
-                # one is a subatring of another or they have only 1 char difference
+                # one is a substring of another or they have only 1 char difference
                 if k1!=k2 and (k1[:k1.find(')')] in k2[:k2.find(')')] or\
                     sum(k1[i] != k2[i] for i in range(min(len(k1),len(k2))))==1) :
                     groupDict[key1]+=groupDict[key2]
