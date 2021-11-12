@@ -1,4 +1,4 @@
-# OP5Project2_Summer21
+# OpenFive Project2 (Summer '21)
 Convert netlist and .stil files into config files for advantest machine using python
 
 ### Version History 
