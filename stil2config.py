@@ -25,7 +25,7 @@ import os
 import re
 import glob
 import openpyxl
-import itertools
+import ast
 from openpyxl.utils.cell import get_column_letter, column_index_from_string
 from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
 from netlist_assignments_csv import netlist_assignments_csv
@@ -42,6 +42,20 @@ DCS_DPS128HC = ['22501-22516','42501-42516','22901-22916','42901-42916']
 PS1600 = ['12501-13216', '11701-12416', '10101-10816', '20101-20816', '40101-40816',\
     '10901-11616', '20901-21616', '40901-41616', '21701-22416', '41701-42416']
 DCS_UHC4T = ['22701-22704', '23001-23004']
+#openpyxl styles
+# Anything with VSS. Make the square black with white lettering.
+VSS = [PatternFill('solid', fgColor='00303030'), Font(color='00FFFFFF')]
+# Anything with VDD make the square Green with Black lettering.
+VDD = [PatternFill('solid', fgColor='0044E436'), Font(color='00000000')]
+# Signals just leave white with Black lettering.
+# Anything with Vref make it Babu Blue with black lettering.
+VREF = [PatternFill('solid', fgColor='0096FBF3'), Font(color='00000000')]
+# Anything with DAC or ADC make dark red with white lettering
+ACDC = [PatternFill('solid', fgColor='00B90A08'), Font(color='00FFFFFF')]
+
+LabelFill = PatternFill('solid', fgColor='00E0E0E0')
+Centered = Alignment(horizontal='center',vertical='center',wrapText=True)
+
 thinBorders = Border(left=Side(style='thin'),right=Side(style='thin'), \
     top=Side(style='thin'), bottom=Side(style='thin'))
 
@@ -100,7 +114,14 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
             if not 'Pin Name,Channel' in lines[0]:
                 return print('\nCannot find valid netlist assignments')
             tempDict = {}
+            ballMapPresent = False
             for line in lines[1:]:
+                if ballMapPresent :
+                    try: 
+                        ballMap = ast.literal_eval(line)
+                        if len(ballMap.keys()) < 10: ballMap = None
+                    except: ballMap = None
+                if '##For Ball Map##' in line: ballMapPresent = True; continue
                 if len(line) < 4 or line.count(',')<2: break
                 try:
                     data = line.replace('\n','').split(',')
@@ -398,7 +419,6 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         print('Pin Name Cross-Refs location: ',os.path.relpath(transferFile))
     print('Config file location: '+ '\x1b[0;30;43m' +\
             configFileName + '\x1b[0m')
-    #print(ballMap)
     make_excel_docs(productName,outputDir,netDict,configFileName,ballMap)
 
 def find_oddities(entries,pinCounts,sites,locations):
@@ -451,11 +471,11 @@ def get_diff(netDict,stilList,locations):
     return differ, stilDiff, netDiff
 
 def make_excel_docs(productName, outputDir, netDict, configFile, ballMap):
-    outFileName = os.path.join(outputDir,productName+'config_info.xlsx')
+    outFileName = os.path.join(outputDir,productName+'_BGA_Map.xlsx')
     i = 0
     while os.path.isfile(outFileName) :
         i+=1
-        outFileName = outFileName[:outFileName.rfind('_info')] + '_info_' +str(i) + '.xlsx'
+        outFileName = outFileName[:outFileName.rfind('_Map')] + '_Map_' +str(i) + '.xlsx'
     
     workbook = openpyxl.Workbook()
     
@@ -467,9 +487,12 @@ def make_excel_docs(productName, outputDir, netDict, configFile, ballMap):
     if ballMap:
         for ballLoc in ballMap.keys():
             if ballLoc == '""':continue
-            try:
-                WS[ballLoc] = ballMap[ballLoc]
-            except:pass
+            #try:
+            row = column_index_from_string(re.sub('[^A-Z]','',ballLoc.upper()))
+            column = get_column_letter(int(re.sub('[^0-9]','',ballLoc)))
+            location = column + str(row)
+            WS[location] = ballMap[ballLoc]
+            #except:pass
     else:
         with open(configFile,'r') as config:
             content = config.read()
@@ -479,27 +502,50 @@ def make_excel_docs(productName, outputDir, netDict, configFile, ballMap):
             balls = re.findall(',[A-Z]{1,3}[0-9]{1,3},',line)
             channel = line[:line.find(',')]
             for ball in balls:
-                assignments[ball.replace(',','')] = pinName  + '                 ' + channel
+                assignments[ball.replace(',','')] = pinName  + '\n' + channel
         for ballLoc in assignments.keys():
             if ballLoc == '""':continue
-            WS[ballLoc] = assignments[ballLoc] 
+            #switch the column and row
+            row = column_index_from_string(re.sub('[^A-Z]','',ballLoc.upper()))
+            column = get_column_letter(int(re.sub('[^0-9]','',ballLoc)))
+            location = column + str(row)
+            WS[location] = assignments[ballLoc] 
     #set dimensions
     for col in range(WS.max_column+1):
         WS.column_dimensions[get_column_letter(col+1)].width = 13
     for row in range(WS.max_row+1):
         WS.row_dimensions[row].height = 64   
-    #add borders
+    #add borders and styles
     for row in WS.rows:
         for cell in row:
             cell.border = thinBorders
-            cell.alignment = Alignment(horizontal='center',vertical='center',wrap_text=True)
-    #delete empty columns
-    for col in range(1,WS.max_column+1):
+            cell.alignment = Centered
+            if not cell.value:continue 
+            if 'vss' in cell.value.lower():
+                cell.fill = VSS[0]; cell.font = VSS[1]
+            elif 'vdd' in cell.value.lower():
+                cell.fill = VDD[0]; cell.font = VDD[1]
+            elif 'vref' in cell.value.lower():
+                cell.fill = VREF[0]; cell.font = VREF[1]
+            elif 'adc' in cell.value.lower() or 'dac' in cell.value.lower():
+                cell.fill = ACDC[0]; cell.font = ACDC[1]
+    #delete empty rows
+    for row in range(1,WS.max_row+1):
         empty = True
-        for row in range(1,WS.max_row+1):
+        for col in range(1,WS.max_column):
             if WS.cell(row=row,column=col).value: empty = False; break
         if empty:
-            WS.delete_cols(col,1)
+            WS.delete_rows(row,1)
+    #label the switched axises
+    WS.insert_cols(0,1); WS.insert_rows(0,1)
+    for row in range(1,WS.max_row):
+        WS.cell(row+1,1).value = get_column_letter(row)
+        WS.cell(row+1,1).alignment = Centered
+        WS.cell(row+1,1).fill = LabelFill
+    for col in range(1,WS.max_column):
+        WS.cell(1,col+1).value = col
+        WS.cell(1,col+1).alignment = Centered
+        WS.cell(1,col+1).fill = LabelFill
     workbook.save(outFileName)
 
 
@@ -545,4 +591,4 @@ if __name__ == '__main__' :
             args.printerr)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    #except: print('Cannot convert given files')
+    except: print('Cannot convert given files')

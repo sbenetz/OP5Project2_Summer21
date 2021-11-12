@@ -202,9 +202,9 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
                             pNames[pinName] += [channelNum, pinNum]
                     else: pNames[pinName] = [channelNum, pinNum]
                     if not pinNum in ballMap.keys():
-                        ballMap[pinNum] = pinName + '                 ' + channelNum
+                        ballMap[pinNum] = pinName + '\n' + channelNum
                     elif not channelNum in ballMap[pinNum]:
-                        ballMap[pinNum] += ',            ' + channelNum
+                        ballMap[pinNum] += ',\n' + channelNum
             if pinNum and pinName and not pinNum in ballMap.keys():
                 ballMap[pinNum] = pinName 
             if pinName in pNames.keys() :
@@ -228,6 +228,8 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
     for key in pNames:
         if key in excluded: continue
         writeFile.write(key+','+','.join(pNames[key])+'\n')
+    writeFile.write('##For Ball Map##\n')
+    writeFile.write(str(ballMap)+'\n')
     writeFile.close()
     print('Done!                                   ')
     return [pNames,os.path.abspath(outputFile),ballMap]
@@ -275,4 +277,4 @@ if __name__ == '__main__' :
         netlist_assignments_csv(args.inputFile,args.outputDir,args.name,args.exclude)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    #except: print('Cannot convert given file')
+    except: print('Cannot convert given file')
