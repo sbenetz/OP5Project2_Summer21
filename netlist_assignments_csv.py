@@ -8,15 +8,17 @@
 #   in the format Net Name,Channel Assignment(s),Pin Number(s)  #
 #                                                               #
 #################################################################
-# Version 0.0                                                   #
+# Version 0.1                                                   #
 # By Shane Benetz                                               #
-# Date: 09.15.2021                                              #
+# Date: 11.18.2021                                              #
 #################################################################
 #################################################################
 # Version 0.0 is first release 09.09.2021                       #
+# Version 0.1 adds a case where the channel number is not at    #
+#             the start of the cell                             #
 #################################################################
 
-version = '0.0'
+version = '0.1'
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -190,6 +192,12 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
                         if channel: 
                             channelNum = channel.group(0).strip()
                             updatedC = True
+                        else:
+                             # *12345*
+                            channel = re.search('[^0-9][0-9]{5}[^0-9]',entry)
+                            if channel: 
+                                channelNum = channel.group(0)[1:6]
+                                updatedC = True
                 
                 # if its a new set of assignments   
                 if pinName and pinNum and channelNum and (updatedC or updatedP) and pinName!= pinNum: 
@@ -216,21 +224,20 @@ def netlist_assignments_csv(inputFile,outputDir,productName,excluded):
     if len(pNames.keys()) == 0 : return print('Did not find any valid assignments.'\
         ' Check that net name column has the word "name" in the column header.')
     outputFile = os.path.join(outputDir,productName+'_netlist_assignments.csv')
-    writeFile = open(outputFile,'w')
-    chHeader = 'Channel Number'
-    testLine = pNames[list(pNames.keys())[0]]
-    for i in range(0,len(testLine)):
-        if re.search('[A-OQ-Z]',testLine[i]): break
-        if i == 1 : chHeader = 'Channel Site-1,Channel Site-2'
-        elif i > 1: chHeader += ',Channel Site-'+str(i+1)
-        
-    writeFile.write('Pin Name,%s,Ball Number(s),(Sheet name: Row #)\n'%chHeader)
-    for key in pNames:
-        if key in excluded: continue
-        writeFile.write(key+','+','.join(pNames[key])+'\n')
-    writeFile.write('##For Ball Map##\n')
-    writeFile.write(str(ballMap)+'\n')
-    writeFile.close()
+    with open(outputFile,'w') as writeFile:
+        chHeader = 'Channel Number'
+        testLine = pNames[list(pNames.keys())[0]]
+        for i in range(0,len(testLine)):
+            if re.search('[A-OQ-Z]',testLine[i]): break
+            if i == 1 : chHeader = 'Channel Site-1,Channel Site-2'
+            elif i > 1: chHeader += ',Channel Site-'+str(i+1)
+            
+        writeFile.write('Pin Name,%s,Ball Number(s),(Sheet name: Row #)\n'%chHeader)
+        for key in pNames:
+            if key in excluded: continue
+            writeFile.write(key+','+','.join(pNames[key])+'\n')
+        writeFile.write('##For Ball Map##\n')
+        writeFile.write(str(ballMap)+'\n')
     print('Done!                                   ')
     return [pNames,os.path.abspath(outputFile),ballMap]
 

@@ -121,6 +121,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
                         ballMap = ast.literal_eval(line)
                         if len(ballMap.keys()) < 10: ballMap = None
                     except: ballMap = None
+                    continue
                 if '##For Ball Map##' in line: ballMapPresent = True; continue
                 if len(line) < 4 or line.count(',')<2: break
                 try:
@@ -591,4 +592,4 @@ if __name__ == '__main__' :
             args.printerr)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    except: print('Cannot convert given files')
+    #except: print('Cannot convert given files')
