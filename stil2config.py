@@ -566,7 +566,7 @@ if __name__ == '__main__' :
     parser.add_argument('-v', '-V', '--version', dest='version', action='store_true',\
         default=False, help='get version of script and exit')
     parser.add_argument('-i', '--input', nargs='+', dest='inputs', default=['.'], \
-        help='path of excel file and .stil file(s) to convert or the already converted'\
+        help='path of excel file and .stil(.gz) file(s) to convert or the already converted'\
             '\ncsv version of both. can also take directory with files in it')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')

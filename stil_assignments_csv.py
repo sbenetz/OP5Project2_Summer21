@@ -3,9 +3,9 @@
 #                     stil_assignments_csv                    	#
 #################################################################
 #                                                               #
-#   This script takes a .stil file that contains a list of pin  #
-#   names and in/out assignments and converts to a csv          #  
-#   in the format Net Name, In/Out Assignment                   #    
+#   This script takes a .stil or .stil.gz file that contains a  #
+#   list of pin names and in/out assignments and converts to    #
+#   a csv in the format Net Name, In/Out Assignment             #    
 #                                                               #
 #################################################################
 # Version 0.1                                                   #
@@ -151,7 +151,7 @@ if __name__ == '__main__' :
     parser.add_argument('-v', '-V', '--version', dest='version', action='store_true',\
         default=False, help='get version of script and exit')
     parser.add_argument('-i', '--input', dest='inputs', nargs = '+', required=True, \
-        help='path of .stil file(s) to convert')
+        help='path of .stil or .stil.gz file(s) to convert')
     parser.add_argument('-o', '--output', dest='outputDir', default='.', \
         help='output folder path. creates output path if DNE. DEFAULT current folder')
     parser.add_argument('-n', '--name', dest='name', default=None, \
