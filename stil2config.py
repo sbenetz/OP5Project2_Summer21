@@ -81,7 +81,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         file = os.path.realpath(re.sub('["\']','',file))
         if not os.path.isfile(file):
             print(file+' is not a file'); continue
-        if file.contains('.stil'): stilFiles.append(file)
+        if '.stil' in file: stilFiles.append(file)
         elif file.endswith('stil_assignments.csv'): stilCSV = file
         elif file.endswith('netlist_assignments.csv'): netlistCSV = file
         elif re.search('.xslx|.xls|.xlsm',file): netlistFile = file
