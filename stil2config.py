@@ -8,9 +8,9 @@
 #   for the 93k advantest ATE                                   #
 #                                                               #
 #################################################################
-# Version 0.0                                                   #
+# Version 0.1                                                   #
 # By Shane Benetz                                               #
-# Date: 09.10.2021                                              #
+# Date: 12.11.2021                                              #
 #################################################################
 #################################################################
 # Version 0.0 is first release 09.10.2021                       #
@@ -84,7 +84,8 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
         if '.stil' in file: stilFiles.append(file)
         elif file.endswith('stil_assignments.csv'): stilCSV = file
         elif file.endswith('netlist_assignments.csv'): netlistCSV = file
-        elif re.search('.xslx|.xls|.xlsm',file): netlistFile = file
+        elif re.search('.xslx|.xls|.xlsm',file) and not file.endswith('BGA_Map.xlsx'):
+            netlistFile = file
     outputDir = os.path.realpath(re.sub('["\']','',outputDir))
     try:
         if not (os.path.isdir(outputDir)) :
@@ -140,6 +141,7 @@ def stil2config(inputFiles, outputDir, productName, card, anType, printErr):
     # get .stil assignments
     stilList = None
     if stilCSV == None and len(stilFiles)>0:
+        print(stilFiles)
         stilList, stilCSV = stil_assignments_csv(stilFiles,outputDir,productName)
     if stilCSV and stilList == None:
         with open(stilCSV,'r') as stil:
@@ -592,4 +594,4 @@ if __name__ == '__main__' :
             args.printerr)
     except KeyboardInterrupt:
         print('\n Keyboard Interrupt: Process Killed')
-    #except: print('Cannot convert given files')
+    except: print('Cannot convert given files')

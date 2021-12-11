@@ -8,21 +8,23 @@
 #   in the format Net Name, In/Out Assignment                   #    
 #                                                               #
 #################################################################
-# Version 0.0                                                   #
+# Version 0.1                                                   #
 # By Shane Benetz                                               #
-# Date: 09.09.2021                                              #
+# Date: 12.11.2021                                              #
 #################################################################
 #################################################################
 # Version 0.0 is first release 09.09.2021                       #
+# Version 0.1 is adding functionality for .gz stil files  09      #
 #################################################################
 
-version = '0.0'
+version = '0.1'
 
 import argparse
 import os
 import re
 import sys
 import itertools
+import gzip
 
 def stil_assignments_csv(inputFiles,outputDir, productName):
     '''Takes in a list of .stil files and gets all the pins definitions from them
@@ -38,20 +40,24 @@ def stil_assignments_csv(inputFiles,outputDir, productName):
             print('Output folder created: ',os.path.abspath(outputDir))
         outputDir = os.path.relpath(outputDir)
         if not os.access(outputDir, os.W_OK) or not os.access(outputDir, os.R_OK):
-            return print('Output directory not accessible')
-    except: return print('Cannot use given output directory')
+            print('Output directory not accessible'); return 
+    except: print('Cannot use given output directory'); return 
 
     signalList=[]
     for file in inputFiles: 
         # check inputs
         inputFile = os.path.realpath(re.sub('["\']','',file))
-        if not os.path.isfile(inputFile) or not inputFile.endswith('.stil'): 
-            return print(inputFile+' is not a file')
-        stilFile = open(inputFile, 'r')
-        contents = stilFile.read()
+        if not os.path.exists(inputFile): 
+            print(inputFile+' is not a file'); return 
+        if inputFile.endswith('.stil'):
+            stilFile = open(inputFile, 'r')
+        elif inputFile.endswith('.stil.gz'):
+            stilFile = gzip.open(inputFile, 'r')
+        else : print(inputFile+' is not a file'); return
+        contents = str(stilFile.read())
         # get block of signal names
         sigStartInd = contents.find('Signals {')+9
-        if sigStartInd == -1: return print('Cannot find signals in ',inputFile)
+        if sigStartInd == -1: print('Cannot find signals in ',inputFile); return 
         signals = contents[sigStartInd:sigStartInd+contents[sigStartInd:].find('}')]
         signals = re.sub(' +', ' ', re.sub('(\n|")','',signals)).strip()+' '
         signalList += list(set(signals.split(';'))- set(signalList)) #join non repeats 
@@ -72,8 +78,13 @@ def stil_assignments_csv(inputFiles,outputDir, productName):
             continue
         else:
             if signal == '':continue
-            updatedSignalList.append(signal.replace(' ',','))
+            signal = signal.replace(' ',',')
+            if signal.find(',') != signal.rfind(','): 
+                signal = signal[signal.find(',')+1:]
+            if ('In' in signal or 'Out' in signal) and ',' in signal:
+                updatedSignalList.append(signal)
     signalList = updatedSignalList
+    print(signalList)
     typeOrder = [',In',',Out',',InOut','']
     #sort list first in typeOrder then alphabetically
     signalList = sorted(signalList,key=lambda x:(typeOrder.index(x[x.find(','):]),x))
