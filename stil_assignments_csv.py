@@ -84,7 +84,6 @@ def stil_assignments_csv(inputFiles,outputDir, productName):
             if ('In' in signal or 'Out' in signal) and ',' in signal:
                 updatedSignalList.append(signal)
     signalList = updatedSignalList
-    print(signalList)
     typeOrder = [',In',',Out',',InOut','']
     #sort list first in typeOrder then alphabetically
     signalList = sorted(signalList,key=lambda x:(typeOrder.index(x[x.find(','):]),x))
